@@ -1,9 +1,22 @@
 scio.read.dssat = function(filepath) {
   
+  
+  # returns string w/o leading whitespace
+  xtrim.leading <- function (x)  sub("^\\s+", "", x)
+  
+  # returns string w/o trailing whitespace
+  xtrim.trailing <- function (x) sub("\\s+$", "", x)
+  
+  # returns string w/o leading or trailing whitespace
+  xtrim <- function (x) gsub("^\\s+|\\s+$", "", x)
+  
+  
   con = file(filepath, "r")
   
   #================================= INIT MAIN VARIABLES
   
+  ALL_VARIABLES_ARE_DOUBLE = TRUE
+  #---------------------------       
   dssat_fileNames <- character()
   dssat_sections  <- character()
   dssat_fields    <- list()
@@ -56,7 +69,9 @@ scio.read.dssat = function(filepath) {
             
             if(cur_char !=" "){
               
-              if(cur_char == '.'){in_decimals = TRUE}
+              if(cur_char == '.'){ in_decimals = TRUE }
+              
+              
               if(in_decimals == TRUE){
                 other_counterR = other_counterR + 1
               }else{
@@ -91,6 +106,8 @@ scio.read.dssat = function(filepath) {
               }
               
               fields_text = c(fields_text,is_text)
+              if (is_text == TRUE) { ALL_VARIABLES_ARE_DOUBLE = FALSE }
+              
               #----------------------
               space_counter = 1
               other_counterL = 0
@@ -101,7 +118,7 @@ scio.read.dssat = function(filepath) {
           }
         }
         
-        #---------------------------
+        #---------------------------     
         
         size = space_counter + other_counterL + other_counterR
         fields_size = c(fields_size,size)
@@ -111,14 +128,14 @@ scio.read.dssat = function(filepath) {
         
         fields_decimals = c(fields_decimals,decimals)
         
-        artifact = substr(file_line,i-other_counterL-other_counterR,i-1)
+        artifact = substr(file_line,nchar(file_line)-other_counterL-other_counterR+1,nchar(file_line))
         
         is_neg = 1
         if(substr(artifact,1,1) == '-'){is_neg = 2}
         
         is_text = FALSE
-        partL = substr(artifact,is_neg,other_counterL)
         
+        partL = substr(artifact,is_neg,other_counterL)
         if(grepl("\\D", partL)){is_text = TRUE}
         
         if(decimals > 0){
@@ -127,7 +144,8 @@ scio.read.dssat = function(filepath) {
           if(grepl("\\D", partR)){is_text = TRUE}
         }
         
-        fields_text = c(fields_text,is_text)
+        fields_text = c(fields_text,is_text)        
+        if (is_text == TRUE) { ALL_VARIABLES_ARE_DOUBLE = FALSE }
         
         #---------------------------     
         
@@ -143,21 +161,28 @@ scio.read.dssat = function(filepath) {
         
         if (nchar(file_line)>0) {
           
-          cleaned_line <- substr(file_line,2,nchar(file_line))
+          cleaned_line <- xtrim.leading(file_line)
+          
+          
           data_list <- strsplit(cleaned_line, "\\s+")
           
-          data <- as.double(unlist(data_list))
+          
+          if (ALL_VARIABLES_ARE_DOUBLE == TRUE) {
+            
+            data <- as.double(unlist(data_list))
+            
+          }else{ data <- unlist(data_list) }
+          
           
           if (is_First_Line_After_Variables == TRUE) {
             
             dssat_data[nrow(dssat_data),] <- data
             is_First_Line_After_Variables = FALSE 
             
-          }else { dssat_data = rbind(dssat_data,data)  
-          
-          }
+          }else { dssat_data = rbind(dssat_data,data) }
           
           colnames(dssat_data) <- fields_name
+          rownames(dssat_data) <- c()
           
         }
       }
@@ -165,7 +190,21 @@ scio.read.dssat = function(filepath) {
     }else{  
       
       if (is_Data_Line == TRUE) {
-        dssat_tables[[tix]] <- as.data.frame(dssat_data)
+        
+        if (ALL_VARIABLES_ARE_DOUBLE == TRUE) {
+          
+          dssat_tables[[tix]] <- as.data.frame(dssat_data)
+          
+        }else{   
+          
+          xdssat_data <- data.frame(dssat_data, stringsAsFactors=FALSE)
+          
+          k <- sapply(fields_text, isFALSE)
+          xdssat_data[,k] <- lapply(xdssat_data[,k], as.double)
+          
+          dssat_tables[[tix]] <- xdssat_data
+        }  
+        
         is_Data_Line = FALSE
       }
       
@@ -173,7 +212,6 @@ scio.read.dssat = function(filepath) {
       
       if(substr(file_line, 1, 4) == "*RUN"){
         
-        #---------------------------     
         if(tix>0){
           dssat_fields[[tix]] <- list(name = fields_name, size = fields_size, text = fields_text, decimals = fields_decimals)
         }
@@ -184,6 +222,20 @@ scio.read.dssat = function(filepath) {
         #---------------------------     
         dssat_fileNames[[tix]]<- filepath    
         dssat_sections[[tix]] <- file_line
+      }
+      
+      if(substr(file_line, 1, 11) == "*EVALUATION"){
+        
+        if(tix>0){
+          dssat_fields[[tix]] <- list(name = fields_name, size = fields_size, text = fields_text, decimals = fields_decimals)
+        }
+        
+        #---------------------------     
+        tix <- tix + 1  
+        
+        #---------------------------     
+        dssat_fileNames[[tix]]<- filepath    
+        dssat_sections[[tix]] <- xtrim.trailing(substr(file_line, 1,regexpr('DSSAT',file_line)-1))
       }
       
     }
@@ -205,7 +257,23 @@ scio.read.dssat = function(filepath) {
   
   #-------------------------------------------
   dssat_fields[[tix]] <- list(name = fields_name, size = fields_size, text = fields_text, decimals = fields_decimals)
-  dssat_tables[[tix]] <- as.data.frame(dssat_data)
+  
+  #-------------------------------------------
+  
+  if (ALL_VARIABLES_ARE_DOUBLE == TRUE) {
+    
+    dssat_tables[[tix]] <- as.data.frame(dssat_data)
+    
+  }else{   
+    
+    xdssat_data <- data.frame(dssat_data, stringsAsFactors=FALSE)
+    
+    k <- sapply(fields_text, isFALSE)
+    xdssat_data[,k] <- lapply(xdssat_data[,k], as.double)
+    
+    dssat_tables[[tix]] <- xdssat_data
+  }
+  
   #-------------------------------------------
   close(con)
   
